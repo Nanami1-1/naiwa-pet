@@ -167,7 +167,11 @@ class SpriteSet:
         painter.setOpacity(1.0)
 
     def _draw_pupil(self, painter, pose):
+        # gaze 是屏幕方向，但镜像时画笔的 x 轴是反的，
+        # 不取反的话瞳孔会朝相反方向看。
         gx = max(-1.0, min(1.0, pose.gaze[0])) * self.travel
+        if pose.flip:
+            gx = -gx
         gy = max(-1.0, min(1.0, pose.gaze[1])) * self.travel * 0.75
         c = QPointF(self.plate_center.x() + gx, self.plate_center.y() + gy)
         r = self.pupil_r * (1.0 + 0.06 * (1 - abs(pose.gaze[1])))
