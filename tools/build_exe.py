@@ -92,7 +92,7 @@ def copy_assets(dst_root):
         return drop
 
     if os.path.exists(dst):
-        shutil.rmtree(dst)
+        shutil.rmtree(dst, ignore_errors=True)
     shutil.copytree(src, dst, ignore=ignore)
     total = sum(os.path.getsize(os.path.join(r, f))
                 for r, _, fs in os.walk(dst) for f in fs)
@@ -103,9 +103,10 @@ def main():
     if not os.path.exists(os.path.join(BASE, "assets", "pet.ico")):
         raise SystemExit("缺少 assets/pet.ico，先跑 tools/make_icon.py")
 
-    for d in (DIST, BUILD):
-        if os.path.exists(d):
-            shutil.rmtree(d)
+    if "--no-clean" not in sys.argv:
+        for d in (DIST, BUILD):
+            if os.path.exists(d):
+                shutil.rmtree(d, ignore_errors=True)
 
     cmd = [
         sys.executable, "-m", "PyInstaller",
