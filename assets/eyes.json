@@ -1,0 +1,67 @@
+{
+  "width": 229,
+  "height": 460,
+  "eyes": [
+    {
+      "name": "near",
+      "iris_box": [
+        79,
+        14,
+        104,
+        37
+      ],
+      "iris": [
+        132,
+        167,
+        83
+      ],
+      "gaze": true,
+      "pupil": [
+        95.5,
+        27.0,
+        6.65
+      ],
+      "box": [
+        76,
+        11,
+        108,
+        41
+      ],
+      "plate": "pet_eye_near.png"
+    },
+    {
+      "name": "far",
+      "iris_box": [
+        55,
+        25,
+        59,
+        38
+      ],
+      "iris": [
+        40,
+        44,
+        30
+      ],
+      "gaze": false,
+      "pupil": [
+        57.0,
+        31.5,
+        3.78
+      ],
+      "box": [
+        52,
+        22,
+        63,
+        42
+      ],
+      "plate": null
+    }
+  ],
+  "variants": {
+    "base": "pet_base.png",
+    "blink": "pet_blink.png",
+    "happy": "pet_happy.png",
+    "sleep": "pet_sleep.png",
+    "angry": "pet_angry.png"
+  }
+}

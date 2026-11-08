@@ -1,0 +1,13 @@
+{
+  "_说明": "把自定义音效文件名填在右边，留空就用 assets/sounds/ 里的内置合成音。文件放在本目录下即可，支持 wav/mp3/ogg/m4a/flac。",
+  "tap": "",
+  "tap_many": "",
+  "drag": "",
+  "land": "",
+  "pet": "",
+  "feed": "",
+  "hungry": "",
+  "sleep": "",
+  "wake": "",
+  "spin": ""
+}

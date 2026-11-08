@@ -1,0 +1,24 @@
+# ---- 打包产物（体积大，走 Release 附件分发，不进仓库）
+dist/
+build/
+*.spec
+
+# ---- Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# ---- 音效原始素材（_orig 是剪辑前的备份，仓库里只留处理后的 wav）
+assets/sounds/custom/_orig/
+
+# ---- 本地临时文件
+crash.log
+_*.png
+预览*.png
+
+# ---- 系统
+Thumbs.db
+desktop.ini
+.DS_Store
