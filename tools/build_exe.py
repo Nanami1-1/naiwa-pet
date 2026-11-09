@@ -19,6 +19,8 @@ import subprocess
 import sys
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if BASE not in sys.path:          # 脚本在 tools/ 下，要能 import 到根目录的 version
+    sys.path.insert(0, BASE)
 DIST = os.path.join(BASE, "dist")
 BUILD = os.path.join(BASE, "build")
 APP_NAME = "Blobby"
@@ -105,12 +107,17 @@ def set_version(ver: str):
     with open(path, "r", encoding="utf-8") as f:
         text = f.read()
     import re
-    new = re.sub(r'(?m)^VERSION\s*=\s*"[^"]*"', 'VERSION = "%s"' % ver, text)
-    if new == text:
+    # 用 subn 的命中次数判断，不能用「替换后文本有没有变」——
+    # 想设的版本和现有版本相同时文本不变，会被误判成没找到
+    new, hits = re.subn(r'(?m)^VERSION\s*=\s*"[^"]*"', 'VERSION = "%s"' % ver, text)
+    if hits == 0:
         raise SystemExit("version.py 里没找到 VERSION 行")
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(new)
-    print("版本号已设为 %s" % ver)
+    if new != text:
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(new)
+        print("版本号已改为 %s" % ver)
+    else:
+        print("版本号已经是 %s" % ver)
 
 
 def write_version_json(ver: str):
@@ -182,7 +189,7 @@ def main():
     print("压缩包: %s.zip (%.1f MB)" % (zip_base, os.path.getsize(zip_base + ".zip") / 1024 / 1024))
 
     write_version_json(VERSION)
-    print("\n版本 %s 打包完成。发布流程：")
+    print("\n版本 %s 打包完成。发布流程：" % VERSION)
     print("  1. 提交 version.py / version.json")
     print("  2. 打 tag 并推送:  git tag v%s && git push --tags" % VERSION)
     print("  3. 网页建 Release，附件传上面的 zip")
