@@ -121,18 +121,39 @@ def set_version(ver: str):
 
 
 def write_version_json(ver: str):
-    """给 jsDelivr 兜底源用手写的清单，发布前记得一起提交。"""
+    """给 jsDelivr 兜底源用的清单，发布前记得一起提交。
+
+    必须自带附件地址和 sha256：GitHub API 被限流（共享出口 IP 很容易 403）时
+    客户端会走这里，没有这些字段就只能降级成手动下载。
+    """
     import json
+    import hashlib
+
     from version import REPO
+
+    zip_path = os.path.join(DIST, APP_NAME + "-win64.zip")
+    size, digest = 0, ""
+    if os.path.exists(zip_path):
+        h = hashlib.sha256()
+        with open(zip_path, "rb") as f:
+            for chunk in iter(lambda: f.read(1 << 20), b""):
+                h.update(chunk)
+        size, digest = os.path.getsize(zip_path), h.hexdigest()
+
+    tag = "v" + ver
     data = {
         "version": ver,
-        "url": "https://github.com/%s/releases/latest" % REPO,
+        "url": "https://github.com/%s/releases/tag/%s" % (REPO, tag),
         "notes": "",
+        "asset_url": "https://github.com/%s/releases/download/%s/%s-win64.zip"
+                     % (REPO, tag, APP_NAME),
+        "asset_size": size,
+        "asset_sha256": digest,
     }
     path = os.path.join(BASE, "version.json")
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
-    print("已生成 version.json（记得和代码一起提交）")
+    print("已生成 version.json（%.2f MB, sha256 %s…）" % (size / 1024 / 1024, digest[:12]))
 
 
 def main():

@@ -23,6 +23,7 @@ from version import REPO, VERSION
 
 API_URL = "https://api.github.com/repos/%s/releases/latest" % REPO
 CDN_URL = "https://cdn.jsdelivr.net/gh/%s@main/version.json" % REPO
+RAW_URL = "https://raw.githubusercontent.com/%s/main/version.json" % REPO
 RELEASES_URL = "https://github.com/%s/releases/latest" % REPO
 
 CHECK_INTERVAL = 24 * 3600      # 一天最多自动查一次
@@ -124,8 +125,9 @@ class UpdateChecker(QObject):
     def start(self):
         self._done = False
         self._queue = [
-            (API_URL, self._parse_api),
-            (CDN_URL, self._parse_cdn),
+            (API_URL, self._parse_api),      # 信息最全，但共享出口 IP 容易被限流
+            (CDN_URL, self._parse_cdn),      # 国内可达，但有缓存延迟
+            (RAW_URL, self._parse_cdn),      # 实时，作为最后兜底
         ]
         self._next()
 
@@ -201,6 +203,9 @@ class UpdateChecker(QObject):
             version=ver,
             url=(d.get("url") or RELEASES_URL).strip(),
             notes=(d.get("notes") or "").strip()[:400],
+            asset_url=(d.get("asset_url") or "").strip(),
+            asset_size=int(d.get("asset_size") or 0),
+            asset_digest=("sha256:" + d["asset_sha256"]) if d.get("asset_sha256") else "",
         )
 
 
