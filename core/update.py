@@ -124,10 +124,13 @@ class UpdateChecker(QObject):
 
     def start(self):
         self._done = False
+        # 第三项表示「权威源」：只有它说没更新才是真的没更新。
+        # 兜底源有缓存（jsDelivr 可能还是上一个版本），它说不新时必须继续问下一个，
+        # 否则一个新版本会被旧缓存压住整整一个缓存周期。
         self._queue = [
-            (API_URL, self._parse_api),      # 信息最全，但共享出口 IP 容易被限流
-            (CDN_URL, self._parse_cdn),      # 国内可达，但有缓存延迟
-            (RAW_URL, self._parse_cdn),      # 实时，作为最后兜底
+            (API_URL, self._parse_api, True),    # 信息最全，但共享出口 IP 容易被限流
+            (CDN_URL, self._parse_cdn, False),   # 国内可达，但有缓存延迟
+            (RAW_URL, self._parse_cdn, False),   # 实时，最后兜底
         ]
         self._next()
 
@@ -145,16 +148,16 @@ class UpdateChecker(QObject):
             self._finish(None)
             return
 
-        url, parser = self._queue.pop(0)
+        url, parser, authoritative = self._queue.pop(0)
         req = QNetworkRequest(QUrl(url))
         req.setHeader(QNetworkRequest.KnownHeaders.UserAgentHeader, "NaiwaPet/%s" % VERSION)
         req.setRawHeader(b"Accept", b"application/vnd.github+json")
         req.setTransferTimeout(NET_TIMEOUT)
 
         reply = self._nam.get(req)
-        reply.finished.connect(lambda: self._on_reply(reply, parser))
+        reply.finished.connect(lambda: self._on_reply(reply, parser, authoritative))
 
-    def _on_reply(self, reply, parser):
+    def _on_reply(self, reply, parser, authoritative=False):
         info = None
         try:
             if reply.error() == QNetworkReply.NetworkError.NoError:
@@ -168,11 +171,15 @@ class UpdateChecker(QObject):
         if self._done:
             return
 
-        if info is not None:
-            # 请求成功就到此为止：有新版本就报，没有就不报
-            self._finish(info if is_newer(info.version) else None)
-        else:
-            self._next()      # 这个源失败，换下一个
+        if info is not None and is_newer(info.version):
+            self._finish(info)
+            return
+        if info is not None and authoritative:
+            # 权威源说没有更新，那就是没有，不必再麻烦兜底源
+            self._finish(None)
+            return
+        # 请求失败，或兜底源给的是旧数据 —— 继续问下一个源
+        self._next()
 
     # -------------------------------------------------- 解析
     @staticmethod
