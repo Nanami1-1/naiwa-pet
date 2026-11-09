@@ -73,6 +73,8 @@ LINES = {
     "spin": ["转圈圈！", "看我表演", "嘿！"],
 }
 
+SINGLETON = "blobby-pet-single-instance"
+
 FONT = "Microsoft YaHei UI"
 
 # ---- 更新提示（{ver} 会被替换成新版本号）

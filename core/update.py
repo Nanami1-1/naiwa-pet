@@ -59,10 +59,18 @@ class UpdateInfo:
     version: str = ""
     url: str = ""
     notes: str = ""
+    asset_url: str = ""
+    asset_size: int = 0
+    asset_digest: str = ""
 
     @property
     def display(self) -> str:
         return "v%s" % self.version.lstrip("vV")
+
+    @property
+    def downloadable(self) -> bool:
+        """有没有可以直接下载的安装包。没有就只能开网页手动下。"""
+        return bool(self.asset_url) and self.asset_size > 0
 
 
 # ---------------------------------------------------------------- 本地状态
@@ -170,10 +178,18 @@ class UpdateChecker(QObject):
         tag = (d.get("tag_name") or "").strip()
         if not tag:
             return None
+        asset = {}
+        for a in d.get("assets") or []:
+            if (a.get("name") or "").lower().endswith(".zip"):
+                asset = a
+                break
         return UpdateInfo(
             version=tag,
             url=(d.get("html_url") or RELEASES_URL).strip(),
             notes=(d.get("body") or "").strip()[:400],
+            asset_url=(asset.get("browser_download_url") or "").strip(),
+            asset_size=int(asset.get("size") or 0),
+            asset_digest=(asset.get("digest") or "").strip(),
         )
 
     @staticmethod
@@ -186,3 +202,110 @@ class UpdateChecker(QObject):
             url=(d.get("url") or RELEASES_URL).strip(),
             notes=(d.get("notes") or "").strip()[:400],
         )
+
+
+class UpdateDownloader(QObject):
+    """把安装包下到 staging。带进度，可取消。"""
+
+    progress = Signal("qlonglong", "qlonglong")   # Qt 的 downloadProgress 是 qint64
+    finished = Signal(str, str)      # 错误说明（空串表示成功）, 本地文件路径
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._nam = QNetworkAccessManager(self)
+        self._reply = None
+        self._fh = None
+        self._path = ""
+        self._cancelled = False
+
+    def start(self, info) -> bool:
+        from core.updater import staging_root
+
+        if not info.asset_url:
+            self.finished.emit("这个版本没有可下载的安装包", "")
+            return False
+
+        try:
+            root = staging_root()
+            os.makedirs(root, exist_ok=True)
+            self._path = os.path.join(root, "package.zip")
+            self._fh = open(self._path, "wb")
+        except Exception as e:
+            self.finished.emit("没有写入权限：%s" % e, "")
+            return False
+
+        req = QNetworkRequest(QUrl(info.asset_url))
+        req.setHeader(QNetworkRequest.KnownHeaders.UserAgentHeader, "NaiwaPet/%s" % VERSION)
+        req.setTransferTimeout(30000)
+        req.setAttribute(
+            QNetworkRequest.Attribute.RedirectPolicyAttribute,
+            QNetworkRequest.RedirectPolicy.NoLessSafeRedirectPolicy,
+        )
+
+        self._cancelled = False
+        self._reply = self._nam.get(req)
+        self._reply.readyRead.connect(self._on_read)
+        self._reply.downloadProgress.connect(self.progress)
+        self._reply.finished.connect(lambda: self._on_done(info))
+        return True
+
+    def cancel(self):
+        self._cancelled = True
+        if self._reply is not None:
+            self._reply.abort()
+
+    # -------------------------------------------------- 内部
+    def _on_read(self):
+        if self._fh is None:
+            return
+        try:
+            self._fh.write(bytes(self._reply.readAll()))
+        except Exception:
+            self.cancel()
+
+    def _close_file(self):
+        if self._fh is not None:
+            try:
+                self._fh.close()
+            except Exception:
+                pass
+            self._fh = None
+
+    def _on_done(self, info):
+        self._close_file()
+
+        if self._cancelled:
+            self._cleanup_partial()
+            self.finished.emit("已取消", "")
+            return
+
+        reply = self._reply
+        err = ""
+        if reply is not None and reply.error() != QNetworkReply.NetworkError.NoError:
+            err = reply.errorString() or "网络错误"
+        if reply is not None:
+            reply.deleteLater()
+            self._reply = None
+
+        if err:
+            self._cleanup_partial()
+            self.finished.emit("下载失败：%s" % err, "")
+            return
+
+        from core.updater import verify_zip
+
+        bad = verify_zip(self._path, info.asset_size, info.asset_digest)
+        if bad:
+            self._cleanup_partial()
+            self.finished.emit("安装包校验失败：%s" % bad, "")
+            return
+
+        self.finished.emit("", self._path)
+
+    def _cleanup_partial(self):
+        self._close_file()
+        try:
+            if self._path and os.path.exists(self._path):
+                os.remove(self._path)
+        except Exception:
+            pass

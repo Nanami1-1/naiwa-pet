@@ -15,6 +15,9 @@ assets/sounds/custom/_orig/
 
 # ---- 本地临时文件
 crash.log
+update.log
+_update/
+*.bak
 _*.png
 预览*.png
 

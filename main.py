@@ -14,10 +14,11 @@ BASE = os.path.dirname(os.path.abspath(__file__))
 if BASE not in sys.path:
     sys.path.insert(0, BASE)
 
+from config import SINGLETON
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import QApplication
 
-SINGLETON = "blobby-pet-single-instance"
+
 
 
 def _already_running() -> bool:
@@ -44,6 +45,12 @@ def _fatal(msg):
 
 
 def main():
+    # 助手模式：不建窗口、不建 QApplication，纯粹做文件替换
+    if "--apply-update" in sys.argv:
+        from core.updater import run_updater
+
+        return run_updater(sys.argv)
+
     app = QApplication(sys.argv)
     app.setApplicationName("Blobby")
     app.setQuitOnLastWindowClosed(True)

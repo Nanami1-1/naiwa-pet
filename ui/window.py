@@ -2,16 +2,19 @@
 """桌宠主窗口。"""
 
 import math
+import os
+import subprocess
 import time
 
 from PySide6.QtCore import QElapsedTimer, QPoint, QPointF, QRect, Qt, QTimer, QUrl
 from PySide6.QtGui import (
     QAction, QBitmap, QCursor, QDesktopServices, QGuiApplication, QImage, QPainter, QRegion,
 )
-from PySide6.QtWidgets import QMenu, QWidget
+from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QWidget
 
 import config as C
-from core import update as updater
+from core import update as updater_net
+from core import updater
 from core.motion import Behavior
 from core.needs import Needs
 from core.sfx import Sfx
@@ -80,7 +83,12 @@ class PetWindow(QWidget):
         self._update_info = None
         self._checker = None
         self._manual_check = False
+        self._downloader = None
+        self._download_pct = -1
         QTimer.singleShot(5000, self._auto_check_update)
+
+        # 上次更新完可能留下 _update/ 和 .bak，等助手进程退出后再清
+        QTimer.singleShot(25000, self._cleanup_after_update)
 
     # ---------------------------------------------------------------- 提示
     def _say(self, key):
@@ -264,14 +272,121 @@ class PetWindow(QWidget):
             self.overlay.say(C.UPDATE_LATEST)
 
     def _act_update(self):
-        """菜单里点「更新到 x」：直接开下载页。"""
-        if self._update_info and self._update_info.url:
-            QDesktopServices.openUrl(QUrl(self._update_info.url))
+        """菜单里点「更新到 x」。能下载就自动更新，不能就开网页。"""
+        info = self._update_info
+        if not info:
+            self._manual_check = True
+            self.overlay.say("我去问问……")
+            self._start_update_check()
             return
 
-        self._manual_check = True
-        self.overlay.say("我去问问……")
-        self._start_update_check()
+        if not info.downloadable or not updater.can_write(updater.install_root()):
+            # 没有安装包，或者装在只读目录 —— 退回手动下载
+            if info.url:
+                QDesktopServices.openUrl(QUrl(info.url))
+            self.overlay.say("去网页下载吧")
+            return
+
+        if self._ask_update(info):
+            self._start_download(info)
+
+    def _ask_update(self, info) -> bool:
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setWindowTitle("发现新版本")
+        box.setText("发现新版本 %s" % info.display)
+        extra = "要现在更新吗？更新会重启奶蛙，大概十几秒。"
+        if info.notes:
+            extra += "\n\n" + info.notes.strip()[:220]
+        box.setInformativeText(extra)
+        yes = box.addButton("现在更新", QMessageBox.ButtonRole.AcceptRole)
+        box.addButton("稍后再说", QMessageBox.ButtonRole.RejectRole)
+        box.exec()
+        return box.clickedButton() is yes
+
+    def _start_download(self, info):
+        self.overlay.say("开始下载……")
+        self._download_pct = -1
+        self._downloader = updater_net.UpdateDownloader(self)
+        self._downloader.progress.connect(self._on_download_progress)
+        self._downloader.finished.connect(lambda e, p: self._on_download_done(info, e, p))
+        self._downloader.start(info)
+
+    def _on_download_progress(self, got, total):
+        if total <= 0:
+            return
+        pct = int(got * 100 / total)
+        if pct >= self._download_pct + 10 or pct >= 100:
+            self._download_pct = pct
+            self.overlay.say("下载中 %d%%" % pct)
+
+    def _on_download_done(self, info, error, path):
+        if self._downloader is not None:
+            self._downloader.deleteLater()
+            self._downloader = None
+
+        if error or not path:
+            self.overlay.say("更新失败，等会儿再试")
+            return
+
+        try:
+            src = updater.extract(path)
+        except Exception:
+            self.overlay.say("安装包解不开")
+            return
+
+        if not self._ask_restart(info):
+            self.overlay.say("下载好了，想更新时右键我")
+            return
+
+        self._apply_update(src)
+
+    def _ask_restart(self, info) -> bool:
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Information)
+        box.setWindowTitle("准备就绪")
+        box.setText("%s 已经下载好了" % info.display)
+        box.setInformativeText("现在重启奶蛙，换上新的？")
+        yes = box.addButton("马上重启", QMessageBox.ButtonRole.AcceptRole)
+        box.addButton("待会儿", QMessageBox.ButtonRole.RejectRole)
+        box.exec()
+        return box.clickedButton() is yes
+
+    def _apply_update(self, src):
+        """启动助手进程去换文件，然后自己退出。"""
+        exe = os.path.join(src, updater.EXE_NAME)
+        if not os.path.exists(exe):
+            self.overlay.say("安装包不完整")
+            return
+
+        try:
+            subprocess.Popen(
+                [exe, "--apply-update",
+                 "--target", updater.install_root(),
+                 "--src", src,
+                 "--pid", str(os.getpid()),
+                 "--lock", C.SINGLETON],
+                cwd=src,
+                close_fds=True,
+            )
+        except Exception:
+            self.overlay.say("更新启动失败")
+            return
+
+        self.overlay.say("换新版本啦，一会儿见")
+        QTimer.singleShot(350, self._quit_hard)
+
+    def _quit_hard(self):
+        QApplication.instance().quit()
+
+    def _cleanup_after_update(self):
+        """更新完的残局：删 staging 和 .bak。占用中就下次再说。"""
+        if self._downloader is not None:
+            return
+        try:
+            updater.cleanup_leftovers(keep_bak=True)
+        except Exception:
+            pass
 
     def _act_skip_version(self):
         if not self._update_info:
