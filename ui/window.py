@@ -2,20 +2,22 @@
 """桌宠主窗口。"""
 
 import math
-import os
+import time
 
-from PySide6.QtCore import QElapsedTimer, QPoint, QPointF, QRect, Qt, QTimer
+from PySide6.QtCore import QElapsedTimer, QPoint, QPointF, QRect, Qt, QTimer, QUrl
 from PySide6.QtGui import (
-    QAction, QBitmap, QCursor, QGuiApplication, QImage, QPainter, QRegion,
+    QAction, QBitmap, QCursor, QDesktopServices, QGuiApplication, QImage, QPainter, QRegion,
 )
 from PySide6.QtWidgets import QMenu, QWidget
 
 import config as C
+from core import update as updater
 from core.motion import Behavior
 from core.needs import Needs
 from core.sfx import Sfx
 from core.sprite import SpriteSet
 from ui.bubble import Overlay
+from version import VERSION
 
 MASK_ON = True          # 关掉它可以让透明区也能点，但会挡住桌面
 MASK_THROTTLE = 0.12    # 秒
@@ -73,6 +75,12 @@ class PetWindow(QWidget):
         self.sfx.preload()
         self._sync_pos()
         self._say("tap")
+
+        # 更新检查：启动 5 秒后再查，别和开场动画抢时间
+        self._update_info = None
+        self._checker = None
+        self._manual_check = False
+        QTimer.singleShot(5000, self._auto_check_update)
 
     # ---------------------------------------------------------------- 提示
     def _say(self, key):
@@ -218,8 +226,66 @@ class PetWindow(QWidget):
     def wheelEvent(self, e):
         e.accept()
 
+    # ---------------------------------------------------------------- 更新
+    def _auto_check_update(self):
+        """启动后自动查一次，一天最多查一次。"""
+        state = updater.load_state()
+        if updater.seconds_since_check(state) < updater.CHECK_INTERVAL:
+            return
+        self._manual_check = False
+        self._start_update_check()
+
+    def _start_update_check(self):
+        if self._checker is not None:
+            return
+        self._checker = updater.UpdateChecker(self)
+        self._checker.finished.connect(self._on_update_result)
+        self._checker.start()
+
+    def _on_update_result(self, info):
+        state = updater.load_state()
+        state["last_check"] = time.time()
+        updater.save_state(state)
+
+        if self._checker is not None:
+            self._checker.deleteLater()
+            self._checker = None
+
+        manual = self._manual_check
+        self._manual_check = False
+
+        if info is not None:
+            self._update_info = info
+            state["found"] = info.version
+            updater.save_state(state)
+            if state.get("skipped") != info.version or manual:
+                self.overlay.say(C.UPDATE_LINE.format(ver=info.display))
+        elif manual:
+            self.overlay.say(C.UPDATE_LATEST)
+
+    def _act_update(self):
+        """菜单里点「更新到 x」：直接开下载页。"""
+        if self._update_info and self._update_info.url:
+            QDesktopServices.openUrl(QUrl(self._update_info.url))
+            return
+
+        self._manual_check = True
+        self.overlay.say("我去问问……")
+        self._start_update_check()
+
+    def _act_skip_version(self):
+        if not self._update_info:
+            return
+        state = updater.load_state()
+        state["skipped"] = self._update_info.version
+        updater.save_state(state)
+        self.overlay.say("好吧，这次不升")
+
     # ---------------------------------------------------------------- 菜单
     def _menu(self, gpos):
+        self._build_menu().exec(gpos)
+
+    def _build_menu(self) -> QMenu:
         m = QMenu(self)
         m.setWindowFlags(m.windowFlags() | Qt.WindowType.FramelessWindowHint
                          | Qt.WindowType.NoDropShadowWindowHint)
@@ -272,11 +338,27 @@ class PetWindow(QWidget):
         m.addAction(a_mute)
 
         m.addSeparator()
+
+        info = self._update_info
+        a_up = QAction("更新到 %s" % info.display if info else "检查更新", m)
+        a_up.triggered.connect(self._act_update)
+        m.addAction(a_up)
+
+        if info:
+            a_skip = QAction("这次不更新", m)
+            a_skip.triggered.connect(self._act_skip_version)
+            m.addAction(a_skip)
+
+        a_ver = QAction("奶蛙 v%s" % VERSION, m)
+        a_ver.setEnabled(False)
+        m.addAction(a_ver)
+
+        m.addSeparator()
         a_quit = QAction("退出", m)
         a_quit.triggered.connect(self._quit)
         m.addAction(a_quit)
 
-        m.exec(gpos)
+        return m
 
     def _act_feed(self):
         self.behavior.feed()

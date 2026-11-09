@@ -99,7 +99,48 @@ def copy_assets(dst_root):
     print("素材已复制: %.1f MB" % (total / 1024 / 1024))
 
 
+def set_version(ver: str):
+    """改写 version.py 里的 VERSION。必须赶在 PyInstaller 之前，否则打进 exe 的还是旧号。"""
+    path = os.path.join(BASE, "version.py")
+    with open(path, "r", encoding="utf-8") as f:
+        text = f.read()
+    import re
+    new = re.sub(r'(?m)^VERSION\s*=\s*"[^"]*"', 'VERSION = "%s"' % ver, text)
+    if new == text:
+        raise SystemExit("version.py 里没找到 VERSION 行")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(new)
+    print("版本号已设为 %s" % ver)
+
+
+def write_version_json(ver: str):
+    """给 jsDelivr 兜底源用手写的清单，发布前记得一起提交。"""
+    import json
+    from version import REPO
+    data = {
+        "version": ver,
+        "url": "https://github.com/%s/releases/latest" % REPO,
+        "notes": "",
+    }
+    path = os.path.join(BASE, "version.json")
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    print("已生成 version.json（记得和代码一起提交）")
+
+
 def main():
+    ver_arg = None
+    for i, a in enumerate(sys.argv):
+        if a == "--version" and i + 1 < len(sys.argv):
+            ver_arg = sys.argv[i + 1].strip().lstrip("vV")
+    if ver_arg:
+        set_version(ver_arg)
+
+    import importlib
+    import version as ver_mod
+    importlib.reload(ver_mod)
+    VERSION = ver_mod.VERSION
+
     if not os.path.exists(os.path.join(BASE, "assets", "pet.ico")):
         raise SystemExit("缺少 assets/pet.ico，先跑 tools/make_icon.py")
 
@@ -139,6 +180,12 @@ def main():
     zip_base = os.path.join(DIST, APP_NAME + "-win64")
     shutil.make_archive(zip_base, "zip", DIST, APP_NAME)
     print("压缩包: %s.zip (%.1f MB)" % (zip_base, os.path.getsize(zip_base + ".zip") / 1024 / 1024))
+
+    write_version_json(VERSION)
+    print("\n版本 %s 打包完成。发布流程：")
+    print("  1. 提交 version.py / version.json")
+    print("  2. 打 tag 并推送:  git tag v%s && git push --tags" % VERSION)
+    print("  3. 网页建 Release，附件传上面的 zip")
 
 
 if __name__ == "__main__":

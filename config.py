@@ -4,6 +4,8 @@
 import os
 import sys
 
+from version import REPO, VERSION
+
 if getattr(sys, "frozen", False):
     # 打包成 exe 之后：assets 放在 exe 同级目录，方便别人直接换音效和素材
     BASE = os.path.dirname(os.path.abspath(sys.executable))
@@ -72,3 +74,8 @@ LINES = {
 }
 
 FONT = "Microsoft YaHei UI"
+
+# ---- 更新提示（{ver} 会被替换成新版本号）
+UPDATE_LINE = "我学会新本事了（{ver}），右键我看看"
+UPDATE_LATEST = "已经是最新的啦"
+UPDATE_FAILED = "联网失败，等会儿再试"

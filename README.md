@@ -94,6 +94,43 @@ dist/Blobby-win64.zip       发这个给别人，解压后双击 exe
 - 只想出单文件版：把 `build_exe.py` 里 `--windowed` 后面加个 `--onefile`，再把 `copy_assets` 改成用 `--add-data` 塞进去。启动会慢 2~5 秒。
 
 
+## 版本与更新提示
+
+奶蛙启动 5 秒后会安静地问一句 GitHub「最新版是多少」，一天最多问一次。
+
+- 有新版本 → 冒个气泡「我学会新本事了（vX.Y.Z），右键我看看」，右键菜单里多一条「更新到 vX.Y.Z」，点了打开下载页
+- 已经是最新 → 什么都不说（手动点「检查更新」才会回一句「已经是最新的啦」）
+- 连不上网 → 静默跳过，绝不影响桌宠正常用
+
+更新源有两个，按顺序试：GitHub Releases API → jsDelivr 上的 `version.json`（国内兜底）。两个都失败就当作没有更新。
+
+**一期只做提示，不自动下载和替换文件。** 下载安装还是手动来。
+
+### 改版本号
+
+只改 `version.py` 一处。当前版本会显示在右键菜单底部。
+
+检查记录存在 `%APPDATA%\NaiwaPet\update_state.json`，里面有上次检查时间和「这次不更新」的版本号。删掉它就等于重置。
+
+### 发新版流程
+
+```bash
+python tools/build_exe.py --version 1.2.0
+```
+
+脚本会先改写 `version.py`、再打包，最后生成 `version.json`。然后：
+
+```bash
+git add version.py version.json
+git commit -m "v1.2.0"
+git tag v1.2.0
+git push && git push --tags
+```
+
+再去 GitHub 建 Release、把 tag 选 `v1.2.0`、附件传 `dist/Blobby-win64.zip`。**发布那一刻所有人的奶蛙就知道了**，不需要你推送到客户端。
+
+> 版本号必须真的往上走。忘了改就会出现「永远提示有新版」或者「永远收不到更新」。
+
 ## 双击没反应怎么办
 
 最常见的原因是**系统里不止一个 Python，PATH 上排第一的那个没装 PySide6**。
