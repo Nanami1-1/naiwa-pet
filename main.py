@@ -15,6 +15,7 @@ if BASE not in sys.path:
     sys.path.insert(0, BASE)
 
 from config import SINGLETON
+from version import VERSION
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import QApplication
 
@@ -45,6 +46,11 @@ def _fatal(msg):
 
 
 def main():
+    from core.diag import log, setup
+
+    setup(VERSION)
+    log("启动，参数 %s" % (sys.argv[1:] or "无"))
+
     # 助手模式：不建窗口、不建 QApplication，纯粹做文件替换
     if "--apply-update" in sys.argv:
         from core.updater import run_updater
@@ -78,7 +84,20 @@ def main():
     pet.show()
     code = app.exec()
     server.close()
-    return code
+
+    # PySide6 6.12 在「窗口 + 发过网络请求」之后退出时，析构阶段会原生崩溃
+    # （access violation，没有 Python 栈，用户看到的就是关掉时报错或直接消失）。
+    # 普通 QWidget 不崩，只有这个带遮罩的透明窗口会崩，根因没找到。
+    # 状态文件都是即时写盘的，没有需要 flush 的东西，直接结束进程绕开析构。
+    from core.diag import log as _log
+
+    _log("事件循环结束，硬退出（code=%s）" % code)
+    try:
+        sys.stdout.flush()
+        sys.stderr.flush()
+    except Exception:
+        pass
+    os._exit(0)
 
 
 if __name__ == "__main__":

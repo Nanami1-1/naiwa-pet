@@ -13,6 +13,7 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QWidget
 
 import config as C
+from core import diag
 from core import update as updater_net
 from core import updater
 from core.motion import Behavior
@@ -237,8 +238,8 @@ class PetWindow(QWidget):
     # ---------------------------------------------------------------- 更新
     def _auto_check_update(self):
         """启动后自动查一次，一天最多查一次。"""
-        state = updater.load_state()
-        if updater.seconds_since_check(state) < updater.CHECK_INTERVAL:
+        state = updater_net.load_state()
+        if updater_net.seconds_since_check(state) < updater_net.CHECK_INTERVAL:
             return
         self._manual_check = False
         self._start_update_check()
@@ -246,14 +247,15 @@ class PetWindow(QWidget):
     def _start_update_check(self):
         if self._checker is not None:
             return
-        self._checker = updater.UpdateChecker(self)
+        self._checker = updater_net.UpdateChecker(self)
         self._checker.finished.connect(self._on_update_result)
         self._checker.start()
 
     def _on_update_result(self, info):
-        state = updater.load_state()
+        diag.log("检查结果: %s" % (info.display if info else "无更新"))
+        state = updater_net.load_state()
         state["last_check"] = time.time()
-        updater.save_state(state)
+        updater_net.save_state(state)
 
         if self._checker is not None:
             self._checker.deleteLater()
@@ -265,7 +267,7 @@ class PetWindow(QWidget):
         if info is not None:
             self._update_info = info
             state["found"] = info.version
-            updater.save_state(state)
+            updater_net.save_state(state)
             if state.get("skipped") != info.version or manual:
                 self.overlay.say(C.UPDATE_LINE.format(ver=info.display))
         elif manual:
@@ -274,6 +276,7 @@ class PetWindow(QWidget):
     def _act_update(self):
         """菜单里点「更新到 x」。能下载就自动更新，不能就开网页。"""
         info = self._update_info
+        diag.log("菜单：更新（info=%s）" % (info.display if info else "无"))
         if not info:
             self._manual_check = True
             self.overlay.say("我去问问……")
@@ -391,9 +394,9 @@ class PetWindow(QWidget):
     def _act_skip_version(self):
         if not self._update_info:
             return
-        state = updater.load_state()
+        state = updater_net.load_state()
         state["skipped"] = self._update_info.version
-        updater.save_state(state)
+        updater_net.save_state(state)
         self.overlay.say("好吧，这次不升")
 
     # ---------------------------------------------------------------- 菜单
@@ -467,6 +470,10 @@ class PetWindow(QWidget):
         a_ver = QAction("奶蛙 v%s" % VERSION, m)
         a_ver.setEnabled(False)
         m.addAction(a_ver)
+
+        a_log = QAction("打开日志文件夹", m)
+        a_log.triggered.connect(diag.open_folder)
+        m.addAction(a_log)
 
         m.addSeparator()
         a_quit = QAction("退出", m)

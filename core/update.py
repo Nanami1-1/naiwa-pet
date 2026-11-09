@@ -154,6 +154,8 @@ class UpdateChecker(QObject):
         req.setRawHeader(b"Accept", b"application/vnd.github+json")
         req.setTransferTimeout(NET_TIMEOUT)
 
+        from core import diag
+        diag.log("请求更新源: %s" % url)
         reply = self._nam.get(req)
         reply.finished.connect(lambda: self._on_reply(reply, parser, authoritative))
 
@@ -170,6 +172,9 @@ class UpdateChecker(QObject):
 
         if self._done:
             return
+
+        from core import diag
+        diag.log("  回复 err=%s | 解析=%s" % (reply.error(), info.version if info else None))
 
         if info is not None and is_newer(info.version):
             self._finish(info)

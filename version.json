@@ -1,8 +1,8 @@
 {
-  "version": "1.3.1",
-  "url": "https://github.com/Nanami1-1/naiwa-pet/releases/tag/v1.3.1",
+  "version": "1.3.2",
+  "url": "https://github.com/Nanami1-1/naiwa-pet/releases/tag/v1.3.2",
   "notes": "",
-  "asset_url": "https://github.com/Nanami1-1/naiwa-pet/releases/download/v1.3.1/Blobby-win64.zip",
-  "asset_size": 62435178,
-  "asset_sha256": "6c098ac210a297830b75e1a4ab4e75946214bc67a7154fa54a3f36e28a7eda7a"
+  "asset_url": "https://github.com/Nanami1-1/naiwa-pet/releases/download/v1.3.2/Blobby-win64.zip",
+  "asset_size": 62439255,
+  "asset_sha256": "67daf055a631543ce6621561b97584215a8a0c92435b5531f44879909a045520"
 }
