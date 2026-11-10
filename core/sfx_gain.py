@@ -35,12 +35,53 @@ ALGO_VERSION = 1
 
 _lock = threading.Lock()
 _ready = {}          # (路径, 音量) -> 缓存路径，省掉重复 stat
+_failed = set()      # 已经记过日志的失败路径，免得每播一次写一行
+
+
+def _note_failure(path, exc):
+    if path in _failed:
+        return
+    _failed.add(path)
+    try:
+        diag.log("音效增益失败 %s: %r" % (os.path.basename(path), exc))
+    except Exception:
+        pass
 
 
 def cache_dir() -> str:
     d = os.path.join(diag.log_dir(), "sfx_cache")
     os.makedirs(d, exist_ok=True)
     return d
+
+
+def prune(limit_mb=60, keep_mb=40):
+    """缓存会随着音量档位变化越堆越多（每档一份），超了就按最旧的删。
+
+    只在 preload 的后台线程里调，不占播放路径。
+    """
+    d = cache_dir()
+    try:
+        items = [(os.path.getmtime(os.path.join(d, f)), os.path.join(d, f))
+                 for f in os.listdir(d) if f.endswith(".wav")]
+    except Exception:
+        return 0
+    total = sum(os.path.getsize(p) for _, p in items) / 1024 / 1024
+    if total <= limit_mb:
+        return 0
+
+    removed = 0
+    for _, path in sorted(items):           # 最旧的先删
+        if total <= keep_mb:
+            break
+        try:
+            size = os.path.getsize(path) / 1024 / 1024
+            os.remove(path)
+            total -= size
+            removed += 1
+        except Exception:
+            pass
+    _ready.clear()
+    return removed
 
 
 def prepare(path: str, master: float = 1.0) -> str:
@@ -78,7 +119,10 @@ def prepare(path: str, master: float = 1.0) -> str:
             return out
         try:
             _process(path, out, master)
-        except Exception:
+        except Exception as e:
+            # 失败就回落原文件，但要留个记录——打包版没有控制台，
+            # 不记下来的话「怎么调都不变轻」永远查不出原因
+            _note_failure(path, e)
             return path
     _ready[key] = out
     return out

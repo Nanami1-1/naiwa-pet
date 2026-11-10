@@ -16,7 +16,7 @@ import threading
 import time
 import wave
 
-from config import SOUNDS, CUSTOM_SOUNDS, SFX_VOLUME
+from config import SOUNDS, CUSTOM_SOUNDS, SFX_VOLUME, SFX_VOLUME_LEGACY
 from core import diag, sfx_gain
 
 AUDIO_EXT = (".wav", ".mp3", ".ogg", ".m4a", ".flac", ".aac")
@@ -78,7 +78,14 @@ def _load_volume() -> float:
         with open(_settings_path(), "r", encoding="utf-8") as f:
             v = json.load(f).get("sfx_volume")
         if isinstance(v, (int, float)) and 0.0 <= float(v) <= 1.0:
-            return float(v)
+            v = float(v)
+            # 档位整体调小过，把旧值换成对应的新档，菜单的勾才对得上
+            for old, new in SFX_VOLUME_LEGACY.items():
+                if abs(v - old) < 0.02:
+                    if abs(old - new) > 0.001:
+                        _save_volume(new)
+                    return new
+            return v
     except Exception:
         pass
     return float(SFX_VOLUME)
@@ -254,13 +261,17 @@ class Sfx:
 
         # 逐样本乘增益要几十毫秒到几百毫秒，放后台算，别卡住启动
         def warm():
+            try:
+                sfx_gain.prune()        # 音量档位换过之后，旧缓存会越堆越多
+            except Exception:
+                pass
             for ev in todo:
                 p = self.resolve(ev)
                 if p and p.lower().endswith(".wav"):
                     try:
                         sfx_gain.prepare(p, self.volume)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        diag.log("音效预热失败 %s: %r" % (ev, e))
 
         threading.Thread(target=warm, daemon=True).start()
 
