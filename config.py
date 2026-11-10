@@ -14,6 +14,13 @@ else:
     BASE = os.path.dirname(os.path.abspath(__file__))
     BUNDLED = False
 ASSETS = os.path.join(BASE, "assets")
+# 音效总体音量（0~1）。桌宠是挂在后台陪着的，比普通应用再轻一点更舒服。
+# 这只是软件音量，不动系统音量；右键菜单「音效音量」可以随时调。
+SFX_VOLUME = 0.5
+
+# 右键菜单里的三档
+SFX_VOLUME_CHOICES = (("小声", 0.3), ("适中", 0.5), ("大声", 0.8))
+
 SOUNDS = os.path.join(ASSETS, "sounds")
 CUSTOM_SOUNDS = os.path.join(SOUNDS, "custom")
 

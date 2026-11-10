@@ -8,7 +8,8 @@ import time
 
 from PySide6.QtCore import QElapsedTimer, QPoint, QPointF, QRect, Qt, QTimer, QUrl
 from PySide6.QtGui import (
-    QAction, QBitmap, QCursor, QDesktopServices, QGuiApplication, QImage, QPainter, QRegion,
+    QAction, QActionGroup, QBitmap, QCursor, QDesktopServices, QGuiApplication, QImage,
+    QPainter, QRegion,
 )
 from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QWidget
 
@@ -455,6 +456,17 @@ class PetWindow(QWidget):
         a_mute.triggered.connect(self._act_mute)
         m.addAction(a_mute)
 
+        a_vol = m.addMenu("音效音量")
+        group = QActionGroup(a_vol)
+        group.setExclusive(True)
+        for label, val in C.SFX_VOLUME_CHOICES:
+            act = QAction(label, a_vol)
+            act.setCheckable(True)
+            act.setChecked(abs(self.sfx.volume - val) < 0.05)
+            act.triggered.connect(lambda _c=False, v=val, l=label: self._act_volume(v, l))
+            group.addAction(act)
+            a_vol.addAction(act)
+
         m.addSeparator()
 
         info = self._update_info
@@ -501,6 +513,12 @@ class PetWindow(QWidget):
     def _act_mute(self):
         self.sfx.toggle()
         self.overlay.say("静音了" if not self.sfx.enabled else "有声音了")
+
+    def _act_volume(self, value, label=""):
+        self.sfx.set_volume(value)
+        self.overlay.say("音量调成%s了" % label if label else "音量调好了")
+        # 立刻放一声让人听效果
+        self.behavior._sfx("tap")
 
     def _quit(self):
         self.timer.stop()

@@ -12,10 +12,12 @@
 
 import json
 import os
+import threading
 import time
 import wave
 
-from config import SOUNDS, CUSTOM_SOUNDS
+from config import SOUNDS, CUSTOM_SOUNDS, SFX_VOLUME
+from core import diag, sfx_gain
 
 AUDIO_EXT = (".wav", ".mp3", ".ogg", ".m4a", ".flac", ".aac")
 
@@ -66,9 +68,44 @@ ALIASES = {
 }
 
 
+def _settings_path() -> str:
+    return os.path.join(diag.log_dir(), "settings.json")
+
+
+def _load_volume() -> float:
+    """音量存在 settings.json 里，跟着用户走；没有就用 config 的默认值。"""
+    try:
+        with open(_settings_path(), "r", encoding="utf-8") as f:
+            v = json.load(f).get("sfx_volume")
+        if isinstance(v, (int, float)) and 0.0 <= float(v) <= 1.0:
+            return float(v)
+    except Exception:
+        pass
+    return float(SFX_VOLUME)
+
+
+def _save_volume(v: float):
+    path = _settings_path()
+    data = {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            data = {}
+    except Exception:
+        data = {}
+    data["sfx_volume"] = round(float(v), 3)
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+
 class Sfx:
     def __init__(self, enabled=True):
         self.enabled = enabled
+        self.volume = _load_volume()
         self._map = {}
         self._players = {}
         self._winsound = None
@@ -150,9 +187,11 @@ class Sfx:
             return None
         try:
             if path.lower().endswith(".wav") and self._winsound is not None:
+                # winsound 没有音量参数，只能播预先乘过增益的副本
+                target = sfx_gain.prepare(path, self.volume)
                 # SND_NODEFAULT: 文件坏了也别响系统提示音
                 self._winsound.PlaySound(
-                    path, self._winsound.SND_FILENAME | self._winsound.SND_ASYNC | self._winsound.SND_NODEFAULT
+                    target, self._winsound.SND_FILENAME | self._winsound.SND_ASYNC | self._winsound.SND_NODEFAULT
                 )
             else:
                 self._play_qt(event, path)
@@ -190,26 +229,52 @@ class Sfx:
         if got is None:
             pl = QMediaPlayer()
             out = QAudioOutput()
-            out.setVolume(0.85)
             pl.setAudioOutput(out)
             # QAudioOutput 必须一直被引用着：Qt 的 setAudioOutput 不接管所有权，
             # 只存局部变量的话它会被 GC 掉，播放器就哑了。
             self._players[event] = (pl, out)
         else:
             pl, out = got
+        # 非 wav 走 Qt，没法逐样本处理，只能在输出端设音量
+        out.setVolume(max(0.0, min(1.0, self.volume)))
         pl.stop()
         pl.setSource(QUrl.fromLocalFile(path))
         pl.play()
 
     def preload(self, events=None):
-        """提前建好 Qt 播放器，避免首次播放卡一下。"""
+        """提前建好 Qt 播放器、算好 wav 增益，避免首次播放卡一下。"""
         if not self.enabled:
             return
-        for ev in events or EVENTS:
+        todo = list(events or EVENTS)
+        for ev in todo:
             p = self.resolve(ev)
             if p and not p.lower().endswith(".wav"):
                 self._play_qt(ev, p)
                 self._players[ev][0].stop()
+
+        # 逐样本乘增益要几十毫秒到几百毫秒，放后台算，别卡住启动
+        def warm():
+            for ev in todo:
+                p = self.resolve(ev)
+                if p and p.lower().endswith(".wav"):
+                    try:
+                        sfx_gain.prepare(p, self.volume)
+                    except Exception:
+                        pass
+
+        threading.Thread(target=warm, daemon=True).start()
+
+    def set_volume(self, value, save=True):
+        """改总体音量。下一次播放就生效（增益按音量做缓存键，不会播到旧的）。"""
+        try:
+            v = max(0.0, min(1.0, float(value)))
+        except Exception:
+            return self.volume
+        self.volume = v
+        if save:
+            _save_volume(v)
+            diag.log("音效音量 -> %.2f" % v)
+        return self.volume
 
     def toggle(self):
         self.enabled = not self.enabled
