@@ -13,11 +13,13 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 import time
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
 
-from PySide6.QtCore import QObject, QUrl, Signal
-from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
+from PySide6.QtCore import QObject, Signal
 
 from version import REPO, VERSION
 
@@ -27,7 +29,17 @@ RAW_URL = "https://raw.githubusercontent.com/%s/main/version.json" % REPO
 RELEASES_URL = "https://github.com/%s/releases/latest" % REPO
 
 CHECK_INTERVAL = 24 * 3600      # 一天最多自动查一次
-NET_TIMEOUT = 5000              # 单次请求超时（毫秒）
+NET_TIMEOUT = 8                 # 单次请求超时（秒）
+
+# 网络一律走后台线程 + urllib，不用 QNetworkAccessManager。
+#
+# 原因不是偏好：这个透明窗口 + QNetworkAccessManager 的组合，在 PySide6 6.12 下
+# 会在原生层崩溃（access violation / 堆损坏），有时发生在收到回复的当下，
+# 有时发生在退出析构时。对照实验：同样的窗口，网络换成线程 + urllib 之后，
+# 连续多次运行全部干净退出，一次都没崩；换成 Qt 网络则每次必崩。
+#
+# 副作用是好的：Qt 走系统代理、urllib 走环境变量（Windows 下也会读注册表代理），
+# 以前两套栈表现不一致的问题也一并消失了。
 
 
 # ---------------------------------------------------------------- 版本比较
@@ -111,80 +123,73 @@ def seconds_since_check(state: dict) -> float:
 
 # ---------------------------------------------------------------- 检查器
 
+def _fetch_json(url, timeout=NET_TIMEOUT):
+    req = urllib.request.Request(url, headers={
+        "User-Agent": "NaiwaPet/%s" % VERSION,
+        "Accept": "application/vnd.github+json",
+    })
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return json.loads(r.read().decode("utf-8", "replace"))
+
+
 class UpdateChecker(QObject):
-    """异步查一次。结果通过 finished 发出：UpdateInfo 表示有新版本，None 表示没有。"""
+    """查一次新版本。结果通过 finished 发出：UpdateInfo 表示有新版本，None 表示没有。
+
+    跑在后台线程里，finished 从工作线程发出，Qt 会自动排队到界面线程执行。
+    """
 
     finished = Signal(object)
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._nam = QNetworkAccessManager(self)
-        self._queue = []
         self._done = False
 
     def start(self):
         self._done = False
+        threading.Thread(target=self._work, name="update-check", daemon=True).start()
+
+    # -------------------------------------------------- 内部
+    def _work(self):
+        from core import diag
+
         # 第三项表示「权威源」：只有它说没更新才是真的没更新。
         # 兜底源有缓存（jsDelivr 可能还是上一个版本），它说不新时必须继续问下一个，
         # 否则一个新版本会被旧缓存压住整整一个缓存周期。
-        self._queue = [
-            (API_URL, self._parse_api, True),    # 信息最全，但共享出口 IP 容易被限流
-            (CDN_URL, self._parse_cdn, False),   # 国内可达，但有缓存延迟
-            (RAW_URL, self._parse_cdn, False),   # 实时，最后兜底
-        ]
-        self._next()
+        sources = (
+            (API_URL, self._parse_api, True),     # 信息最全，但共享出口 IP 容易被限流
+            (CDN_URL, self._parse_cdn, False),    # 国内可达，但有缓存延迟
+            (RAW_URL, self._parse_cdn, False),    # 实时，最后兜底
+        )
 
-    # -------------------------------------------------- 内部
+        for url, parser, authoritative in sources:
+            if self._done:
+                return
+            diag.log("请求更新源: %s" % url)
+            try:
+                info = parser(_fetch_json(url))
+            except Exception as e:
+                diag.log("  请求失败: %r" % (e,))
+                continue
+
+            diag.log("  得到: %s" % (info.version if info else "解析不出"))
+            if info is None:
+                continue
+            if is_newer(info.version):
+                self._finish(info)
+                return
+            if authoritative:
+                # 权威源说没有更新，那就是没有，不必再麻烦兜底源
+                self._finish(None)
+                return
+            # 兜底源给的是旧数据，继续问下一个
+
+        self._finish(None)
+
     def _finish(self, info):
         if self._done:
             return
         self._done = True
         self.finished.emit(info)
-
-    def _next(self):
-        if self._done:
-            return
-        if not self._queue:
-            self._finish(None)
-            return
-
-        url, parser, authoritative = self._queue.pop(0)
-        req = QNetworkRequest(QUrl(url))
-        req.setHeader(QNetworkRequest.KnownHeaders.UserAgentHeader, "NaiwaPet/%s" % VERSION)
-        req.setRawHeader(b"Accept", b"application/vnd.github+json")
-        req.setTransferTimeout(NET_TIMEOUT)
-
-        from core import diag
-        diag.log("请求更新源: %s" % url)
-        reply = self._nam.get(req)
-        reply.finished.connect(lambda: self._on_reply(reply, parser, authoritative))
-
-    def _on_reply(self, reply, parser, authoritative=False):
-        info = None
-        try:
-            if reply.error() == QNetworkReply.NetworkError.NoError:
-                raw = bytes(reply.readAll()).decode("utf-8", "replace")
-                info = parser(json.loads(raw))
-        except Exception:
-            info = None
-        finally:
-            reply.deleteLater()
-
-        if self._done:
-            return
-
-        from core import diag
-        diag.log("  回复 err=%s | 解析=%s" % (reply.error(), info.version if info else None))
-
-        if info is not None and is_newer(info.version):
-            self._finish(info)
-            return
-        if info is not None and authoritative:
-            # 权威源说没有更新，那就是没有，不必再麻烦兜底源
-            self._finish(None)
-            return
-        # 请求失败，或兜底源给的是旧数据 —— 继续问下一个源
-        self._next()
 
     # -------------------------------------------------- 解析
     @staticmethod
@@ -222,16 +227,13 @@ class UpdateChecker(QObject):
 
 
 class UpdateDownloader(QObject):
-    """把安装包下到 staging。带进度，可取消。"""
+    """把安装包下到 staging。带进度，可取消。同样跑在后台线程。"""
 
-    progress = Signal("qlonglong", "qlonglong")   # Qt 的 downloadProgress 是 qint64
-    finished = Signal(str, str)      # 错误说明（空串表示成功）, 本地文件路径
+    progress = Signal("qlonglong", "qlonglong")   # 已下载字节, 总字节
+    finished = Signal(str, str)                   # 错误说明（空串表示成功）, 本地文件路径
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._nam = QNetworkAccessManager(self)
-        self._reply = None
-        self._fh = None
         self._path = ""
         self._cancelled = False
 
@@ -246,70 +248,59 @@ class UpdateDownloader(QObject):
             root = staging_root()
             os.makedirs(root, exist_ok=True)
             self._path = os.path.join(root, "package.zip")
-            self._fh = open(self._path, "wb")
         except Exception as e:
             self.finished.emit("没有写入权限：%s" % e, "")
             return False
 
-        req = QNetworkRequest(QUrl(info.asset_url))
-        req.setHeader(QNetworkRequest.KnownHeaders.UserAgentHeader, "NaiwaPet/%s" % VERSION)
-        req.setTransferTimeout(30000)
-        req.setAttribute(
-            QNetworkRequest.Attribute.RedirectPolicyAttribute,
-            QNetworkRequest.RedirectPolicy.NoLessSafeRedirectPolicy,
-        )
-
         self._cancelled = False
-        self._reply = self._nam.get(req)
-        self._reply.readyRead.connect(self._on_read)
-        self._reply.downloadProgress.connect(self.progress)
-        self._reply.finished.connect(lambda: self._on_done(info))
+        threading.Thread(target=self._work, args=(info,),
+                         name="update-download", daemon=True).start()
         return True
 
     def cancel(self):
+        # 只置标志：工作线程最多再读完一个 256KB 块就停
         self._cancelled = True
-        if self._reply is not None:
-            self._reply.abort()
 
     # -------------------------------------------------- 内部
-    def _on_read(self):
-        if self._fh is None:
-            return
+    def _work(self, info):
+        from core import diag
+        from core.updater import verify_zip
+
+        req = urllib.request.Request(info.asset_url, headers={
+            "User-Agent": "NaiwaPet/%s" % VERSION,
+        })
+        got = 0
+        total = int(info.asset_size or 0)
+        diag.log("下载开始: %s" % info.asset_url[:70])
         try:
-            self._fh.write(bytes(self._reply.readAll()))
-        except Exception:
-            self.cancel()
-
-    def _close_file(self):
-        if self._fh is not None:
-            try:
-                self._fh.close()
-            except Exception:
-                pass
-            self._fh = None
-
-    def _on_done(self, info):
-        self._close_file()
+            with urllib.request.urlopen(req, timeout=30) as r, open(self._path, "wb") as f:
+                total = int(r.headers.get("Content-Length") or total or 0)
+                last = 0.0
+                while True:
+                    if self._cancelled:
+                        break
+                    chunk = r.read(256 * 1024)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+                    got += len(chunk)
+                    now = time.monotonic()
+                    if now - last > 0.1:          # 别把进度信号刷爆
+                        last = now
+                        self.progress.emit(got, total)
+        except Exception as e:
+            diag.log("下载失败: %r" % (e,))
+            self._cleanup_partial()
+            self.finished.emit("下载失败：%s" % (e or "网络错误"), "")
+            return
 
         if self._cancelled:
             self._cleanup_partial()
             self.finished.emit("已取消", "")
             return
 
-        reply = self._reply
-        err = ""
-        if reply is not None and reply.error() != QNetworkReply.NetworkError.NoError:
-            err = reply.errorString() or "网络错误"
-        if reply is not None:
-            reply.deleteLater()
-            self._reply = None
-
-        if err:
-            self._cleanup_partial()
-            self.finished.emit("下载失败：%s" % err, "")
-            return
-
-        from core.updater import verify_zip
+        diag.log("下载完成 %d 字节，开始校验" % got)
+        self.progress.emit(got, total or got)
 
         bad = verify_zip(self._path, info.asset_size, info.asset_digest)
         if bad:
@@ -320,7 +311,6 @@ class UpdateDownloader(QObject):
         self.finished.emit("", self._path)
 
     def _cleanup_partial(self):
-        self._close_file()
         try:
             if self._path and os.path.exists(self._path):
                 os.remove(self._path)

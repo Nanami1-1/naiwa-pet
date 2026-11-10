@@ -85,13 +85,16 @@ def main():
     code = app.exec()
     server.close()
 
-    # PySide6 6.12 在「窗口 + 发过网络请求」之后退出时，析构阶段会原生崩溃
-    # （access violation，没有 Python 栈，用户看到的就是关掉时报错或直接消失）。
-    # 普通 QWidget 不崩，只有这个带遮罩的透明窗口会崩，根因没找到。
-    # 状态文件都是即时写盘的，没有需要 flush 的东西，直接结束进程绕开析构。
+    # 退出时直接结束进程，不走 Qt 的析构。
+    #
+    # 原来这里是被迫的：换上 QNetworkAccessManager 之后，这个带遮罩的透明窗口
+    # 在退出析构阶段会原生崩溃（access violation，没有 Python 栈）。v1.3.6 把网络
+    # 换成后台线程 + urllib 之后根因没了（连续多次运行都能干净退出），但这一步
+    # 留着当保险：状态文件全是即时写盘的，没有需要 flush 的东西，
+    # 少走一遍析构，就少一处可能崩的地方。
     from core.diag import log as _log
 
-    _log("事件循环结束，硬退出（code=%s）" % code)
+    _log("事件循环结束（code=%s）" % code)
     try:
         sys.stdout.flush()
         sys.stderr.flush()

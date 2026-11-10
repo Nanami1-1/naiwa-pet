@@ -38,7 +38,9 @@ EXCLUDE = [
     "PySide6.QtSensors", "PySide6.QtSpatialAudio", "PySide6.QtRemoteObjects",
     "PySide6.QtScxml", "PySide6.QtStateMachine", "PySide6.QtTextToSpeech",
     "PySide6.QtMultimediaWidgets", "PySide6.QtSvgWidgets",
-    "tkinter", "unittest", "pydoc", "doctest", "email", "http", "xmlrpc", "pdb",
+    # 注意：http / email 不能排除。urllib.request 依赖 http.client 和 email.parser，
+    # 排掉之后打包版一导入就失败（窗口化运行没有控制台，只表现为启动即退出）。
+    "tkinter", "unittest", "pydoc", "doctest", "xmlrpc", "pdb",
 ]
 
 README_TXT = """Blobby 桌宠
