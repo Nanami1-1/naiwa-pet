@@ -76,8 +76,10 @@ class Behavior:
 
     # ---------------------------------------------------------------- 工具
     def _sfx(self, name):
+        """播放音效。返回 False 说明被高优先级音效挡下来了。"""
         if self.sfx:
-            self.sfx.play(name)
+            return self.sfx.play(name)
+        return None
 
     def place(self, bounds, x=None):
         self.y = float(bounds.bottom())
@@ -140,8 +142,10 @@ class Behavior:
                 self.vy = -560.0
                 self.state = AIR
             self.squash.push(-3.4)
-            self._sfx("tap")
-            self.say("tap")
+            played = self._sfx("tap")
+            # 上一下的特殊语音还在放，气泡也别换，不然看着像被打断了
+            if played is not False:
+                self.say("tap")
 
     def _grounded_once(self):
         return self.state not in (AIR, DRAG)

@@ -12,10 +12,30 @@
 
 import json
 import os
+import time
+import wave
 
 from config import SOUNDS, CUSTOM_SOUNDS
 
 AUDIO_EXT = (".wav", ".mp3", ".ogg", ".m4a", ".flac", ".aac")
+
+# 播放优先级。数字大的不会被小的打断；没列出的按 DEFAULT_PRIORITY 算。
+PRIORITY = {
+    "tap": 10,          # 普通单击，最容易被顶掉
+    "land": 20,
+    "pet": 20,
+    "drag": 25,
+    "feed": 30,
+    "spin": 30,
+    "wake": 40,
+    "sleep": 40,
+    "hungry": 40,
+    "tap_many": 90,     # 连点抗议：可以盖掉别人，自己播完之前谁都不许插进来
+}
+DEFAULT_PRIORITY = 10
+
+# 达到这个优先级的音效，播放期间独占声道（按音频实际时长）
+GUARD_PRIORITY = 90
 
 # 事件清单：键是程序内部名字，值是给人看的中文说明
 EVENTS = {
@@ -57,6 +77,9 @@ class Sfx:
             self._winsound = winsound
         except Exception:
             self._winsound = None
+        self._dur = {}
+        self._lock_until = 0.0
+        self._lock_prio = 0
         self._load_map()
 
     # ---------------------------------------------------------------- 索引
@@ -98,12 +121,33 @@ class Sfx:
         return out
 
     # ---------------------------------------------------------------- 播放
-    def play(self, event):
+    def play(self, event) -> bool:
+        """播放一个事件音效。
+
+        True  = 真的播了
+        False = 被正在播放的高优先级音效挡下来了
+        None  = 没播，但原因跟抢占无关（音效被关掉、找不到文件、播放出错）
+
+        调用方靠 False 和 None 的区别决定要不要顺带更新气泡：
+        只有「被抢先」才该按兵不动，单纯关了音效不该冻住气泡。
+
+        声道只有一个（winsound 的 SND_ASYNC 是后一个顶掉前一个），
+        所以高优先级音效播放期间要独占，否则连点里那句「别戳了」会被
+        第六下点击的普通音效当场切断。
+        """
         if not self.enabled:
-            return
+            return None
+
+        now = time.monotonic()
+        prio = PRIORITY.get(event, DEFAULT_PRIORITY)
+
+        # 高优先级正在播，低优先级让路（不打断，也不排队重放）
+        if now < self._lock_until and prio < self._lock_prio:
+            return False
+
         path = self.resolve(event)
         if not path:
-            return
+            return None
         try:
             if path.lower().endswith(".wav") and self._winsound is not None:
                 # SND_NODEFAULT: 文件坏了也别响系统提示音
@@ -113,7 +157,28 @@ class Sfx:
             else:
                 self._play_qt(event, path)
         except Exception:
-            pass
+            return None
+
+        # 够级别的音效播完之前独占声音
+        if prio >= GUARD_PRIORITY:
+            self._lock_prio = prio
+            self._lock_until = now + max(0.8, self._seconds(path))
+        return True
+
+    def _seconds(self, path) -> float:
+        """音频时长（秒）。读不出来就返回 0，由调用处兜底。"""
+        if path in self._dur:
+            return self._dur[path]
+        dur = 0.0
+        if path.lower().endswith(".wav"):
+            try:
+                with wave.open(path, "rb") as w:
+                    rate = w.getframerate() or 1
+                    dur = w.getnframes() / float(rate)
+            except Exception:
+                dur = 0.0
+        self._dur[path] = dur
+        return dur
 
     def _play_qt(self, event, path):
         try:
