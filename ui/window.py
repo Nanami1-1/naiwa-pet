@@ -467,6 +467,10 @@ class PetWindow(QWidget):
             }
         """ % C.FONT)
 
+        a_hello = QAction("打招呼", m)
+        a_hello.triggered.connect(self._act_hello)
+        m.addAction(a_hello)
+
         a_feed = QAction("喂点东西", m)
         a_feed.triggered.connect(self._act_feed)
         m.addAction(a_feed)
@@ -528,6 +532,11 @@ class PetWindow(QWidget):
         m.addAction(a_quit)
 
         return m
+
+    def _act_hello(self):
+        self.behavior.wake()
+        self.behavior._emote("happy", 1.6)
+        self.overlay.say("你好呀！")
 
     def _act_feed(self):
         self.behavior.feed()
