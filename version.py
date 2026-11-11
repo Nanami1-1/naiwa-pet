@@ -5,7 +5,7 @@
 并用 --version 参数在打包时自动改写。
 """
 
-VERSION = "1.3.6"
+VERSION = "1.3.7"
 
 # 更新源。必须是公开仓库，否则客户端要带 token（不能放客户端里）
 REPO = "Nanami1-1/naiwa-pet"

@@ -81,6 +81,17 @@ class Behavior:
             return self.sfx.play(name)
         return None
 
+    def _wake_if_sleeping(self) -> bool:
+        """睡着时先叫醒，返回 True 表示这次是从睡眠中被弄醒的。
+
+        睡着时任何操作都只响「叫醒」那一声：醒来之后再想播自己的音效也会被
+        叫醒音效的独占窗口挡住，所以调用方直接跳过自己的音效和气泡就行。
+        """
+        if not self.sleepy:
+            return False
+        self.wake()
+        return True
+
     def place(self, bounds, x=None):
         self.y = float(bounds.bottom())
         self.x = float(x if x is not None else bounds.center().x() + random.uniform(-100, 100))
@@ -128,14 +139,16 @@ class Behavior:
         self._sfx("drag")
 
     def click(self):
+        woke = self._wake_if_sleeping()
         self.click_streak += 1
         self.click_timer = 1.3
         if self.click_streak >= 5:
             self.click_streak = 0
             self._emote("angry", 1.7)
             self.needs.scold()
-            self._sfx("tap_many")
-            self.say("tap_many")
+            played = self._sfx("tap_many")
+            if played is not False:
+                self.say("tap_many")
             self.squash.push(2.6)
         else:
             if self._grounded_once():
@@ -143,32 +156,39 @@ class Behavior:
                 self.state = AIR
             self.squash.push(-3.4)
             played = self._sfx("tap")
-            # 上一下的特殊语音还在放，气泡也别换，不然看着像被打断了
-            if played is not False:
+            # 上一下的特殊语音还在放，气泡也别换，不然看着像被打断了；
+            # 刚被叫醒的那一下同理，气泡留在「唔……醒了」
+            if played is not False and not woke:
                 self.say("tap")
 
     def _grounded_once(self):
         return self.state not in (AIR, DRAG)
 
     def double_click(self):
+        if self._wake_if_sleeping():
+            return              # 睡着时双击只负责叫醒，不转圈
         self.spin_t = 0.0
         self._emote("happy", 0.9)
         self._sfx("spin")
         self.say("spin")
 
     def feed(self):
+        woke = self._wake_if_sleeping()
         self.needs.feed()
         self._emote("happy", 1.6)
         self.squash.push(2.4)
-        self._sfx("feed")
-        self.say("feed")
+        if not woke:
+            self._sfx("feed")
+            self.say("feed")
 
     def pet_head(self):
+        woke = self._wake_if_sleeping()
         self.needs.pet()
         self._emote("happy", 1.4)
         self.squash.push(1.6)
-        self._sfx("pet")
-        self.say("pet")
+        if not woke:
+            self._sfx("pet")
+            self.say("pet")
 
     def toggle_sleep(self, bounds):
         if self.sleepy:
