@@ -6,7 +6,7 @@ import os
 import subprocess
 import time
 
-from PySide6.QtCore import QElapsedTimer, QPoint, QPointF, QRect, Qt, QTimer, QUrl
+from PySide6.QtCore import QElapsedTimer, QPoint, QPointF, QRect, Qt, QTimer, QUrl, Slot
 from PySide6.QtGui import (
     QAction, QActionGroup, QBitmap, QCursor, QDesktopServices, QGuiApplication, QImage,
     QPainter, QRegion,
@@ -22,6 +22,7 @@ from core.needs import Needs
 from core.sfx import Sfx
 from core.sprite import SpriteSet
 from ui.bubble import Overlay
+from ui.update_progress import UpdateProgress
 from version import VERSION
 
 MASK_ON = True          # 关掉它可以让透明区也能点，但会挡住桌面
@@ -86,7 +87,9 @@ class PetWindow(QWidget):
         self._checker = None
         self._manual_check = False
         self._downloader = None
-        self._download_pct = -1
+        self._update_progress = None
+        self._download_info = None
+        self._update_finishing = False
         QTimer.singleShot(5000, self._auto_check_update)
 
         # 上次更新完可能留下 _update/ 和 .bak，等助手进程退出后再清
@@ -276,6 +279,10 @@ class PetWindow(QWidget):
 
     def _act_update(self):
         """菜单里点「更新到 x」。能下载就自动更新，不能就开网页。"""
+        if self._downloader is not None or self._update_finishing:
+            if self._update_progress is not None:
+                self._update_progress.show_progress()
+            return
         info = self._update_info
         diag.log("菜单：更新（info=%s）" % (info.display if info else "无"))
         if not info:
@@ -309,36 +316,59 @@ class PetWindow(QWidget):
         return box.clickedButton() is yes
 
     def _start_download(self, info):
+        if self._downloader is not None or self._update_finishing:
+            return
         self.overlay.say("开始下载……")
-        self._download_pct = -1
+        self._download_info = info
+        if self._update_progress is None:
+            self._update_progress = UpdateProgress(self)
+        self._update_progress.begin(info.display, info.asset_size)
+        self._update_progress.show_progress()
         self._downloader = updater_net.UpdateDownloader(self)
         self._downloader.progress.connect(self._on_download_progress)
-        self._downloader.finished.connect(lambda e, p: self._on_download_done(info, e, p))
+        self._downloader.stage_changed.connect(self._on_download_stage)
+        self._downloader.finished.connect(self._on_download_done)
         self._downloader.start(info)
 
+    @Slot("qlonglong", "qlonglong")
     def _on_download_progress(self, got, total):
-        if total <= 0:
-            return
-        pct = int(got * 100 / total)
-        if pct >= self._download_pct + 10 or pct >= 100:
-            self._download_pct = pct
-            self.overlay.say("下载中 %d%%" % pct)
+        if self._update_progress is not None:
+            self._update_progress.set_progress(got, total)
 
-    def _on_download_done(self, info, error, path):
+    @Slot(str)
+    def _on_download_stage(self, text):
+        if self._update_progress is not None:
+            self._update_progress.set_stage(text)
+
+    @Slot(str, str)
+    def _on_download_done(self, error, path):
+        info = self._download_info
         if self._downloader is not None:
             self._downloader.deleteLater()
             self._downloader = None
 
         if error or not path:
+            self._update_progress.fail(error or "没有收到安装包，请重试。")
             self.overlay.say("更新失败，等会儿再试")
             return
 
+        self._update_finishing = True
+        try:
+            self._finish_download(info, path)
+        finally:
+            self._update_finishing = False
+
+    def _finish_download(self, info, path):
+        self._update_progress.set_stage("校验通过，正在解压安装包……")
+        self._update_progress.repaint()
         try:
             src = updater.extract(path)
-        except Exception:
+        except Exception as e:
+            self._update_progress.fail("安装包解压失败：%s" % e)
             self.overlay.say("安装包解不开")
             return
 
+        self._update_progress.hide()
         if not self._ask_restart(info):
             self.overlay.say("下载好了，想更新时右键我")
             return
@@ -470,7 +500,9 @@ class PetWindow(QWidget):
         m.addSeparator()
 
         info = self._update_info
-        a_up = QAction("更新到 %s" % info.display if info else "检查更新", m)
+        updating = self._downloader is not None or self._update_finishing
+        update_label = "更新到 %s" % info.display if info else "检查更新"
+        a_up = QAction("查看更新进度" if updating else update_label, m)
         a_up.triggered.connect(self._act_update)
         m.addAction(a_up)
 

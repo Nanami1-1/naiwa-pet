@@ -230,6 +230,7 @@ class UpdateDownloader(QObject):
     """把安装包下到 staging。带进度，可取消。同样跑在后台线程。"""
 
     progress = Signal("qlonglong", "qlonglong")   # 已下载字节, 总字节
+    stage_changed = Signal(str)
     finished = Signal(str, str)                   # 错误说明（空串表示成功）, 本地文件路径
 
     def __init__(self, parent=None):
@@ -301,6 +302,7 @@ class UpdateDownloader(QObject):
 
         diag.log("下载完成 %d 字节，开始校验" % got)
         self.progress.emit(got, total or got)
+        self.stage_changed.emit("下载完成，正在校验安装包……")
 
         bad = verify_zip(self._path, info.asset_size, info.asset_digest)
         if bad:

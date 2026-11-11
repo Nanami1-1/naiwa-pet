@@ -59,7 +59,10 @@ def main():
 
     app = QApplication(sys.argv)
     app.setApplicationName("Blobby")
-    app.setQuitOnLastWindowClosed(True)
+    # 桌宠和气泡都是 Qt.Tool，不计入普通主窗口。
+    # 更新确认框关闭时不能自动退出，否则下载刚开始进程就结束了。
+    # 退出菜单和更新重启流程会显式调用 quit()。
+    app.setQuitOnLastWindowClosed(False)
 
     if _already_running():
         return 0
