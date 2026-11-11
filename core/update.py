@@ -28,6 +28,9 @@ CDN_URL = "https://cdn.jsdelivr.net/gh/%s@main/version.json" % REPO
 RAW_URL = "https://raw.githubusercontent.com/%s/main/version.json" % REPO
 RELEASES_URL = "https://github.com/%s/releases/latest" % REPO
 
+# finished 收到它，表示「所有源都没连上」，不是「没有新版本」
+FAILED = object()
+
 CHECK_INTERVAL = 24 * 3600      # 一天最多自动查一次
 NET_TIMEOUT = 8                 # 单次请求超时（秒）
 
@@ -155,12 +158,19 @@ class UpdateChecker(QObject):
         # 第三项表示「权威源」：只有它说没更新才是真的没更新。
         # 兜底源有缓存（jsDelivr 可能还是上一个版本），它说不新时必须继续问下一个，
         # 否则一个新版本会被旧缓存压住整整一个缓存周期。
-        sources = (
+        from config import UPDATE_MIRROR
+
+        sources = []
+        if UPDATE_MIRROR:
+            # 自建镜像放最前：国内能连上的话，一次就够了
+            sources.append((UPDATE_MIRROR, self._parse_cdn, False))
+        sources += [
             (API_URL, self._parse_api, True),     # 信息最全，但共享出口 IP 容易被限流
             (CDN_URL, self._parse_cdn, False),    # 国内可达，但有缓存延迟
             (RAW_URL, self._parse_cdn, False),    # 实时，最后兜底
-        )
+        ]
 
+        answered = False
         for url, parser, authoritative in sources:
             if self._done:
                 return
@@ -174,6 +184,7 @@ class UpdateChecker(QObject):
             diag.log("  得到: %s" % (info.version if info else "解析不出"))
             if info is None:
                 continue
+            answered = True
             if is_newer(info.version):
                 self._finish(info)
                 return
@@ -183,7 +194,10 @@ class UpdateChecker(QObject):
                 return
             # 兜底源给的是旧数据，继续问下一个
 
-        self._finish(None)
+        # 一个源都没回答（全被墙/断网）和「确实没有新版本」必须分开，
+        # 否则界面会说「已经是最新的啦」，而且会把 last_check 写下去，
+        # 接下来 24 小时都不再重试。
+        self._finish(None if answered else FAILED)
 
     def _finish(self, info):
         if self._done:

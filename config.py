@@ -25,6 +25,12 @@ SFX_VOLUME_CHOICES = (("小声", 0.2), ("适中", 0.35), ("大声", 0.55))
 # 不映射的话菜单里会一个勾都没有，看着像坏了。
 SFX_VOLUME_LEGACY = {0.3: 0.2, 0.5: 0.35, 0.8: 0.55}
 
+# 更新镜像（可选）。国内的 GitHub 经常连不上，这里填一个国内能访问的
+# version.json 地址（对象存储静态站点、自己服务器都行），会排在所有源最前面。
+# 例如 "https://naiwa-1250000000.cos.ap-shanghai.myqcloud.com/version.json"
+# 留空就只用 GitHub API / jsDelivr / raw 三个源。
+UPDATE_MIRROR = ""
+
 SOUNDS = os.path.join(ASSETS, "sounds")
 CUSTOM_SOUNDS = os.path.join(SOUNDS, "custom")
 

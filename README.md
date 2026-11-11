@@ -101,9 +101,28 @@ dist/Blobby-win64.zip       发这个给别人，解压后双击 exe
 - 有新版本 → 冒气泡提醒，右键菜单里变成「更新到 vX.Y.Z」
 - 点它 → 确认框（带更新说明）→ 下载 → SHA-256 校验 → 解压 → 重启换上
 - 已经是最新 → 什么都不说（手动点「检查更新」才回「已经是最新的啦」）
-- 连不上网 → 静默跳过，绝不影响正常用
+- 三个源都连不上 → 自动检查保持安静；手动检查会回一句「联网失败，等会儿再试」，
+  并且**不写检查记录**，下次启动还会重试（不会因为断网被锁 24 小时）
 
-更新源两个，按顺序试：GitHub Releases API → jsDelivr 上的 `version.json`（国内兜底）。
+更新源按顺序试：自建镜像（可选）→ GitHub Releases API → jsDelivr → raw.githubusercontent。
+每个源 8 秒超时，任一给出「有新版」就停；只有 GitHub API 说「没新版」才算权威结论
+（jsDelivr 有缓存，它说没更新时要继续问下一个）。
+
+### 国内连不上 GitHub 怎么办
+
+GitHub 的 API 和 raw 在国内经常被重置，jsDelivr 也不稳。这时检查会失败，程序照常用，
+但收不到更新提示。想让它对国内用户可用，最省事的办法是加一个**自建镜像**：
+
+1. 开一个对象存储的静态站点（阿里云 OSS / 腾讯云 COS / Cloudflare R2 都行），几块钱一个月
+2. 把仓库里的 `version.json` 和 `Blobby-win64.zip` 传上去，**保持相对路径不变**
+3. 在 `config.py` 里填上清单地址：
+
+```python
+UPDATE_MIRROR = "https://你的桶.oss-cn-hangzhou.aliyuncs.com/naiwa/version.json"
+```
+
+填了之后它排在所有源最前面，国内用户一次就能查到；留空则和以前完全一样。
+`version.json` 里已经有 `asset_url`，把地址改成镜像上的包地址即可连下载也不用走 GitHub。
 
 ### 它怎么在不覆盖自己的情况下换掉自己
 

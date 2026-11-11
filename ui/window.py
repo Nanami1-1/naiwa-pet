@@ -256,6 +256,19 @@ class PetWindow(QWidget):
         self._checker.start()
 
     def _on_update_result(self, info):
+        # 所有源都连不上：别说「已经是最新的啦」，也别写 last_check，
+        # 不然网络恢复后要等一整天才会再试。
+        if info is updater_net.FAILED:
+            diag.log("检查结果: 所有更新源都连不上")
+            if self._checker is not None:
+                self._checker.deleteLater()
+                self._checker = None
+            manual = self._manual_check
+            self._manual_check = False
+            if manual:
+                self.overlay.say(C.UPDATE_FAILED)
+            return
+
         diag.log("检查结果: %s" % (info.display if info else "无更新"))
         state = updater_net.load_state()
         state["last_check"] = time.time()
