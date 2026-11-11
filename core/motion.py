@@ -168,6 +168,7 @@ class Behavior:
         if self._wake_if_sleeping():
             return              # 睡着时双击只负责叫醒，不转圈
         self.spin_t = 0.0
+        self.squash.push(1.4)   # 起手轻轻一弹，转完再落回去，显得有重量
         self._emote("happy", 0.9)
         self._sfx("spin")
         self.say("spin")
@@ -231,7 +232,7 @@ class Behavior:
                 self.emote = None
 
         if self.spin_t >= 0:
-            self.spin_t += dt / 0.62
+            self.spin_t += dt / max(0.2, C.SPIN_SEC)
             if self.spin_t >= 1.0:
                 self.spin_t = -1.0
 
@@ -399,9 +400,21 @@ class Behavior:
             sy *= 0.96
             sx *= 1.03
 
+        # 转圈：真把整只旋转 360°，会有一大半转出窗口被裁掉（窗口只比精灵大一圈），
+        # 看起来就是「转一半人没了」。改用 2D 的老办法：横向压扁 + 过半圈左右翻面，
+        # 原地转一圈，不用改窗口尺寸，也不会糊。
+        spin_sq, spin_flip = 1.0, False
+        if self.spin_t >= 0:
+            u = max(0.0, min(1.0, self.spin_t))
+            e = u * u * (3.0 - 2.0 * u)          # smoothstep：起步和收尾都缓
+            c = math.cos(2.0 * math.pi * e)
+            spin_sq = max(0.18, abs(c))          # 转到侧面时压成一条，像看纸片
+            spin_flip = c < 0                    # 过了半圈换背面
+            sy *= 1.0 - 0.045 * (1.0 - abs(c))   # 侧面稍微收一点高度，像透视
+
         p.sy = sy
-        p.sx = sx
-        p.flip = self.facing_right
+        p.sx = sx * spin_sq
+        p.flip = self.facing_right ^ spin_flip
         p.contact = self.contact
         p.gaze = self.gaze
 
@@ -411,11 +424,7 @@ class Behavior:
         elif self.state == WALK:
             rot += math.sin(self.t * 9.0) * 0.7
 
-        if self.spin_t >= 0:
-            e = 1 - (1 - self.spin_t) ** 3
-            p.rot = 360.0 * e * (1 if not self.facing_right else -1)
-        else:
-            p.rot = max(-C.MAX_ROT, min(C.MAX_ROT, rot)) * (1 if not self.facing_right else -1)
+        p.rot = max(-C.MAX_ROT, min(C.MAX_ROT, rot)) * (1 if not self.facing_right else -1)
 
         variant, a = None, 0.0
         if self.state == SLEEP:

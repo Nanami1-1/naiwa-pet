@@ -194,7 +194,9 @@ class SpriteSet:
 
     def _draw_shadow(self, painter, pose, origin):
         k = max(0.0, min(1.0, pose.contact))
-        w = self.w * (0.60 + 0.10 * (pose.sy - 1.0) * 3) * (1.0 + 0.25 * (1 - k))
+        # 转圈时整只被压扁，影子跟着变窄，看起来才像真的在原地转
+        narrow = 0.55 + 0.45 * min(1.0, max(0.0, pose.sx))
+        w = self.w * (0.60 + 0.10 * (pose.sy - 1.0) * 3) * (1.0 + 0.25 * (1 - k)) * narrow
         h = max(4.0, self.w * 0.11 * (0.75 + 0.45 * k))
         cy = origin.y() - h * 0.25 + 2
         rect = QRectF(origin.x() - w / 2, cy - h / 2, w, h)
