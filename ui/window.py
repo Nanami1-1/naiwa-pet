@@ -157,7 +157,10 @@ class PetWindow(QWidget):
             return
         p = self.behavior.pose()
         key = (round(p.sx, 2), round(p.sy, 2), int(p.rot // 1), p.flip)
-        if key == self._mask_key or self._mask_t > 0:
+        # 转圈时宽度变化很快，遮罩跟不上就会被窗口边缘切掉一块，
+        # 看起来像「一卡一卡地变宽」——所以转圈期间每帧都重建。
+        spinning = self.behavior.spin_t >= 0
+        if key == self._mask_key or (self._mask_t > 0 and not spinning):
             return
         self._mask_key = key
         self._mask_t = MASK_THROTTLE
