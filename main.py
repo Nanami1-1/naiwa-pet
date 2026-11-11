@@ -59,7 +59,11 @@ def main():
 
     app = QApplication(sys.argv)
     app.setApplicationName("Blobby")
-    app.setQuitOnLastWindowClosed(True)
+    # 千万不能开着：桌宠和气泡都是 Qt::Tool 窗口，Qt 不把它们算进「最后一个窗口」，
+    # 于是一关掉更新确认框之类的对话框，Qt 就认为「所有窗口都关了」，直接把进程退掉。
+    # 表现就是：点「现在更新」→ 奶蛙消失 → 什么都没发生。
+    # 退出统一走右键菜单，或者更新助手替换完自己退。
+    app.setQuitOnLastWindowClosed(False)
 
     if _already_running():
         return 0
